@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+env_logger = "0.11.8"
+pollster = "0.4.0"
+wgpu = "25.0.0"
 # Disable default features and only use x11 since wayland windows don't seem to
 # work in WSL2 (which is where I'm doing most of the development for this).
-winit = { version = "0.30.9", default-features = false, features = ["x11"] }
+winit = { version = "0.30.9", default-features = false, features = ["x11", "rwh_06"] }
