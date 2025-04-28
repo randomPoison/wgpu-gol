@@ -1782,6 +1782,7 @@ dependencies = [
 name = "wgpu-gol"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "env_logger",
  "pollster",
  "wgpu",
