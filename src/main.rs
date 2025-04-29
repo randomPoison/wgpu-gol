@@ -25,7 +25,8 @@ const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     attributes: &wgpu::vertex_attr_array![0 => Float32x2],
 };
 
-const GRID_SIZE: usize = 4;
+const GRID_SIZE: usize = 32;
+const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
 
 struct State {
     window: Arc<Window>,
@@ -246,7 +247,7 @@ impl State {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.grid_size_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..VERTICES.len() as u32 / 2, 0..1);
+        render_pass.draw(0..VERTICES.len() as u32 / 2, 0..INSTANCES);
 
         // End the renderpass.
         drop(render_pass);

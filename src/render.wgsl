@@ -1,8 +1,13 @@
 @group(0) @binding(0) var<uniform> grid_size: vec2f;
 
 @vertex
-fn vertex_main(@location(0) pos: vec2f) -> @builtin(position) vec4f {
-    let cell_coords = vec2f(0, 0);
+fn vertex_main(
+    @location(0) pos: vec2f,
+    @builtin(instance_index) instance_index: u32,
+) -> @builtin(position) vec4f {
+    // Calculate the coordinates of the cell in the grid.
+    let index = f32(instance_index);
+    let cell_coords = vec2f(floor(index / grid_size.x), index % grid_size.x);
 
     // Calculate the size of a cell in clip space.
     let cell_size = 2.0 / grid_size;
@@ -15,6 +20,9 @@ fn vertex_main(@location(0) pos: vec2f) -> @builtin(position) vec4f {
 
     // Shift the square so that its top left corner is in the top left corner of the window.
     grid_pos += vec2f(-1, 1);
+
+    // Shift the square to the position for its cell coordinates.
+    grid_pos += cell_coords * cell_size * vec2f(1, -1);
 
     return vec4f(grid_pos, 0, 1);
 }
