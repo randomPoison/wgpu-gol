@@ -25,6 +25,8 @@ const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     attributes: &wgpu::vertex_attr_array![0 => Float32x2],
 };
 
+const GRID_SIZE: usize = 4;
+
 struct State {
     window: Arc<Window>,
     device: wgpu::Device,
@@ -35,6 +37,7 @@ struct State {
     surface_format: wgpu::TextureFormat,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    grid_size_bind_group: wgpu::BindGroup,
 }
 
 impl State {
@@ -74,9 +77,39 @@ impl State {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("render.wgsl"));
 
+        let grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Size Buffer"),
+            contents: bytemuck::cast_slice(&[GRID_SIZE as f32, GRID_SIZE as f32]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let grid_size_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Grid Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        let grid_size_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Grid Bind Group"),
+            layout: &grid_size_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: grid_size_buffer.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&grid_size_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -137,6 +170,7 @@ impl State {
             surface_format,
             render_pipeline,
             vertex_buffer,
+            grid_size_bind_group,
         };
 
         // Configure surface for the first time
@@ -210,8 +244,9 @@ impl State {
         });
 
         render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.grid_size_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..6, 0..1);
+        render_pass.draw(0..VERTICES.len() as u32 / 2, 0..1);
 
         // End the renderpass.
         drop(render_pass);
