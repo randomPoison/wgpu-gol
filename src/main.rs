@@ -3,6 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 use wgpu::util::DeviceExt;
+use wgpu_gol::{GRID_SIZE, LifeSimulation};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -21,59 +22,29 @@ static VERTICES: &[f32] = &[
   -0.8,  0.8,
 ];
 
-const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
-    array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
-    step_mode: wgpu::VertexStepMode::Vertex,
-    attributes: &wgpu::vertex_attr_array![0 => Float32x2],
-};
-
-const GRID_SIZE: usize = 256;
 const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
 const TICK_INTERVAL_MS: u64 = 1000 / 10;
-const WORKGROUP_SIZE: u32 = 8;
-
-// Make sure the grid is evenly divisible into work groups.
-const _: () = assert!(GRID_SIZE as u32 % WORKGROUP_SIZE == 0); 
 
 struct State {
+    sim: LifeSimulation,
+
     window: Arc<Window>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    bind_groups: [wgpu::BindGroup; 2],
-    compute_pipeline: wgpu::ComputePipeline,
-    step: u64,
     last_tick: Instant,
 }
 
 impl State {
-    async fn new(window: Arc<Window>) -> State {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        dbg!(adapter.get_info());
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await
-            .unwrap();
+    async fn new(window: Arc<Window>) -> Self {
+        let sim = LifeSimulation::new().await;
 
         let size = window.inner_size();
-
-        let surface = instance.create_surface(window.clone()).unwrap();
-        let surface_caps = surface.get_capabilities(&adapter);
+        let surface = sim.instance.create_surface(window.clone()).unwrap();
+        let surface_caps = surface.get_capabilities(&sim.adapter);
         let surface_format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -86,185 +57,73 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grid Size Buffer"),
-            contents: bytemuck::cast_slice(&[GRID_SIZE as f32, GRID_SIZE as f32]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let render_shader = sim
+            .device
+            .create_shader_module(wgpu::include_wgsl!("render.wgsl"));
+        let render_pipeline = sim
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Render Pipeline"),
+                layout: Some(&sim.pipeline_layout),
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Grid Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+                vertex: wgpu::VertexState {
+                    module: &render_shader,
+                    entry_point: Some("vertex_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                    }],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+
+                fragment: Some(wgpu::FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
                 },
-            ],
-        });
+                multiview: None,
+                cache: None,
+            });
 
-        let mut initial_cell_states = [0u32; GRID_SIZE * GRID_SIZE];
-        for i in 0..GRID_SIZE * GRID_SIZE {
-            initial_cell_states[i] = rand::random::<u32>() % 2;
-        }
-
-        let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cell State Buffer"),
-            contents: bytemuck::cast_slice(&initial_cell_states),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        for i in 0..GRID_SIZE * GRID_SIZE {
-            initial_cell_states[i] = 0;
-        }
-
-        let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cell State Buffer"),
-            contents: bytemuck::cast_slice(&initial_cell_states),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Grid Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: grid_size_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cell_state_buffer_a.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: cell_state_buffer_b.as_entire_binding(),
-                },
-            ],
-        });
-
-        let bind_group_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Grid Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: grid_size_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: cell_state_buffer_b.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: cell_state_buffer_a.as_entire_binding(),
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let render_shader = device.create_shader_module(wgpu::include_wgsl!("render.wgsl"));
-        let simulation_shader = device.create_shader_module(wgpu::include_wgsl!("simulation.wgsl"));
-
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&pipeline_layout),
-
-            vertex: wgpu::VertexState {
-                module: &render_shader,
-                entry_point: Some("vertex_main"),
-                buffers: &[VBUFF_LAYOUT],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-
-            fragment: Some(wgpu::FragmentState {
-                module: &render_shader,
-                entry_point: Some("fragment_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
-
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Simulation Pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &simulation_shader,
-            entry_point: Some("compute_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = sim
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         let mut state = State {
+            sim,
             window,
-            device,
-            queue,
             config,
             size,
             surface,
             surface_format,
             render_pipeline,
             vertex_buffer,
-            bind_groups: [bind_group_a, bind_group_b],
-            compute_pipeline,
-            step: 0,
             last_tick: Instant::now(),
         };
 
@@ -289,7 +148,7 @@ impl State {
             desired_maximum_frame_latency: 2,
             present_mode: wgpu::PresentMode::AutoVsync,
         };
-        self.surface.configure(&self.device, &self.config);
+        self.surface.configure(&self.sim.device, &self.config);
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -327,27 +186,15 @@ impl State {
             });
 
         let mut encoder = self
+            .sim
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Compute Pass"),
-            timestamp_writes: None,
-        });
+        self.sim.encode_compute_pass(&mut encoder);
 
-        compute_pass.set_pipeline(&self.compute_pipeline);
-        compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
-        compute_pass.dispatch_workgroups(
-            GRID_SIZE as u32 / WORKGROUP_SIZE,
-            GRID_SIZE as u32 / WORKGROUP_SIZE,
-            1,
-        );
-
-        drop(compute_pass);
-
-        self.step += 1;
+        self.sim.step += 1;
 
         // Create the renderpass which will clear the screen.
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -366,7 +213,7 @@ impl State {
         });
 
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
+        render_pass.set_bind_group(0, &self.sim.bind_groups[(self.sim.step % 2) as usize], &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.draw(0..VERTICES.len() as u32 / 2, 0..INSTANCES);
 
@@ -374,7 +221,7 @@ impl State {
         drop(render_pass);
 
         // Submit the command in the queue to execute
-        self.queue.submit([encoder.finish()]);
+        self.sim.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
     }
