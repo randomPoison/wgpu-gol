@@ -1,4 +1,5 @@
 @group(0) @binding(0) var<uniform> grid_size: vec2f;
+@group(0) @binding(1) var<storage> in_state: array<u32>;
 
 @vertex
 fn vertex_main(
@@ -23,6 +24,9 @@ fn vertex_main(
 
     // Shift the square to the position for its cell coordinates.
     grid_pos += cell_coords * cell_size * vec2f(1, -1);
+
+    // Scale the square to 0 if the cell is disabled.
+    grid_pos *= f32(in_state[instance_index]);
 
     return vec4f(grid_pos, 0, 1);
 }
