@@ -1,8 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use wgpu_gol::LifeSimulation;
 
+const GRID_SIZE: u32 = 1024;
+
 fn benchmark(c: &mut Criterion) {
-    let mut sim = pollster::block_on(LifeSimulation::new());
+    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE));
 
     c.bench_function("1 step", |b| {
         b.iter(|| {

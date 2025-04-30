@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 use wgpu::util::DeviceExt;
-use wgpu_gol::{GRID_SIZE, LifeSimulation};
+use wgpu_gol::LifeSimulation;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -22,7 +22,7 @@ static VERTICES: &[f32] = &[
   -0.8,  0.8,
 ];
 
-const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
+const GRID_SIZE: u32 = 512;
 const TICK_INTERVAL_MS: u64 = 1000 / 10;
 
 struct State {
@@ -40,7 +40,7 @@ struct State {
 
 impl State {
     async fn new(window: Arc<Window>) -> Self {
-        let sim = LifeSimulation::new().await;
+        let sim = LifeSimulation::new(GRID_SIZE).await;
 
         let size = window.inner_size();
         let surface = sim.instance.create_surface(window.clone()).unwrap();
@@ -213,7 +213,7 @@ impl State {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.sim.bind_groups[(self.sim.step % 2) as usize], &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.draw(0..VERTICES.len() as u32 / 2, 0..INSTANCES);
+        render_pass.draw(0..VERTICES.len() as u32 / 2, 0..self.sim.num_cells as u32);
 
         // End the renderpass.
         drop(render_pass);

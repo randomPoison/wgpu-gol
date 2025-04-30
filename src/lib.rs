@@ -1,10 +1,6 @@
 use wgpu::util::DeviceExt;
 
-pub const GRID_SIZE: usize = 256;
 const WORKGROUP_SIZE: u32 = 8;
-
-// Make sure the grid is evenly divisible into work groups.
-const _: () = assert!(GRID_SIZE as u32 % WORKGROUP_SIZE == 0);
 
 pub struct LifeSimulation {
     pub instance: wgpu::Instance,
@@ -15,10 +11,22 @@ pub struct LifeSimulation {
     pub compute_pipeline: wgpu::ComputePipeline,
     pub bind_groups: [wgpu::BindGroup; 2],
     pub step: u64,
+
+    pub grid_size: u32,
+    pub num_cells: usize,
 }
 
 impl LifeSimulation {
-    pub async fn new() -> Self {
+    pub async fn new(grid_size: u32) -> Self {
+        // Make sure the grid size is a multiple of the workgroup size so that
+        // the simulation can be broken up cleanly into workgroups.
+        assert!(
+            grid_size as u32 % WORKGROUP_SIZE == 0,
+            "Grid size {grid_size} is not divisible by {WORKGROUP_SIZE}",
+        );
+
+        let num_cells = (grid_size * grid_size) as usize;
+
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
 
         let adapter = instance
@@ -38,7 +46,7 @@ impl LifeSimulation {
 
         let grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Size Buffer"),
-            contents: bytemuck::cast_slice(&[GRID_SIZE as f32, GRID_SIZE as f32]),
+            contents: bytemuck::cast_slice(&[grid_size as f32, grid_size as f32]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -78,8 +86,8 @@ impl LifeSimulation {
             ],
         });
 
-        let mut initial_cell_states = [0u32; GRID_SIZE * GRID_SIZE];
-        for i in 0..GRID_SIZE * GRID_SIZE {
+        let mut initial_cell_states = vec![0u32; num_cells as usize];
+        for i in 0..num_cells {
             initial_cell_states[i] = rand::random::<u32>() % 2;
         }
 
@@ -89,7 +97,7 @@ impl LifeSimulation {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        for i in 0..GRID_SIZE * GRID_SIZE {
+        for i in 0..num_cells {
             initial_cell_states[i] = 0;
         }
 
@@ -162,6 +170,8 @@ impl LifeSimulation {
             compute_pipeline,
             bind_groups: [bind_group_a, bind_group_b],
             step: 0,
+            grid_size,
+            num_cells,
         }
     }
 
@@ -174,8 +184,8 @@ impl LifeSimulation {
         compute_pass.set_pipeline(&self.compute_pipeline);
         compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
         compute_pass.dispatch_workgroups(
-            GRID_SIZE as u32 / WORKGROUP_SIZE,
-            GRID_SIZE as u32 / WORKGROUP_SIZE,
+            self.grid_size / WORKGROUP_SIZE,
+            self.grid_size / WORKGROUP_SIZE,
             1,
         );
 
