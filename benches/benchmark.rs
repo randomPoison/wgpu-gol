@@ -1,4 +1,4 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use wgpu_gol::LifeSimulation;
 
 const GRID_SIZE: u32 = 1024;
@@ -6,32 +6,19 @@ const GRID_SIZE: u32 = 1024;
 fn benchmark(c: &mut Criterion) {
     let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE));
 
-    c.bench_function("1 step", |b| {
-        b.iter(|| {
-            simulate_n_steps(&mut sim, 1);
+    let mut group = c.benchmark_group("Simulate N Steps");
+    for size in [1_u64, 10, 100, 1_000] {
+        group.throughput(Throughput::Elements(size));
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, size| {
+            b.iter(|| {
+                simulate_n_steps(&mut sim, *size);
+            });
         });
-    });
-
-    c.bench_function("10 steps", |b| {
-        b.iter(|| {
-            simulate_n_steps(&mut sim, 10);
-        });
-    });
-
-    c.bench_function("100 steps", |b| {
-        b.iter(|| {
-            simulate_n_steps(&mut sim, 100);
-        });
-    });
-
-    c.bench_function("1000 steps", |b| {
-        b.iter(|| {
-            simulate_n_steps(&mut sim, 1_000);
-        });
-    });
+    }
+    group.finish();
 }
 
-fn simulate_n_steps(sim: &mut LifeSimulation, n: usize) {
+fn simulate_n_steps(sim: &mut LifeSimulation, n: u64) {
     sim.step = 0;
 
     let mut encoder = sim
