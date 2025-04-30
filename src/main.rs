@@ -29,8 +29,11 @@ const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
 
 const GRID_SIZE: usize = 32;
 const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
-
 const TICK_INTERVAL_MS: u64 = 1000;
+const WORKGROUP_SIZE: u32 = 8;
+
+// Make sure the grid is evenly divisible into work groups.
+const _: () = assert!(GRID_SIZE as u32 % WORKGROUP_SIZE == 0); 
 
 struct State {
     window: Arc<Window>,
@@ -43,6 +46,7 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     bind_groups: [wgpu::BindGroup; 2],
+    compute_pipeline: wgpu::ComputePipeline,
     step: u64,
     last_tick: Instant,
 }
@@ -82,8 +86,6 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("render.wgsl"));
-
         let grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Grid Size Buffer"),
             contents: bytemuck::cast_slice(&[GRID_SIZE as f32, GRID_SIZE as f32]),
@@ -95,7 +97,7 @@ impl State {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -105,9 +107,19 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -149,6 +161,10 @@ impl State {
                     binding: 1,
                     resource: cell_state_buffer_a.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: cell_state_buffer_b.as_entire_binding(),
+                },
             ],
         });
 
@@ -164,6 +180,10 @@ impl State {
                     binding: 1,
                     resource: cell_state_buffer_b.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: cell_state_buffer_a.as_entire_binding(),
+                },
             ],
         });
 
@@ -173,19 +193,22 @@ impl State {
             push_constant_ranges: &[],
         });
 
+        let render_shader = device.create_shader_module(wgpu::include_wgsl!("render.wgsl"));
+        let simulation_shader = device.create_shader_module(wgpu::include_wgsl!("simulation.wgsl"));
+
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&pipeline_layout),
 
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &render_shader,
                 entry_point: Some("vertex_main"),
                 buffers: &[VBUFF_LAYOUT],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
 
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &render_shader,
                 entry_point: Some("fragment_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -214,6 +237,15 @@ impl State {
             cache: None,
         });
 
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Simulation Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &simulation_shader,
+            entry_point: Some("compute_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -231,6 +263,7 @@ impl State {
             render_pipeline,
             vertex_buffer,
             bind_groups: [bind_group_a, bind_group_b],
+            compute_pipeline,
             step: 0,
             last_tick: Instant::now(),
         };
@@ -300,6 +333,23 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Compute Pass"),
+            timestamp_writes: None,
+        });
+
+        compute_pass.set_pipeline(&self.compute_pipeline);
+        compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
+        compute_pass.dispatch_workgroups(
+            GRID_SIZE as u32 / WORKGROUP_SIZE,
+            GRID_SIZE as u32 / WORKGROUP_SIZE,
+            1,
+        );
+
+        drop(compute_pass);
+
+        self.step += 1;
+
         // Create the renderpass which will clear the screen.
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
@@ -316,7 +366,6 @@ impl State {
             occlusion_query_set: None,
         });
 
-        self.step += 1;
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -389,12 +438,6 @@ fn main() {
     // process. Preferred for applications that want to render as fast as
     // possible, like games.
     event_loop.set_control_flow(ControlFlow::Poll);
-
-    // When the current loop iteration finishes, suspend the thread until
-    // another event arrives. Helps keeping CPU utilization low if nothing
-    // is happening, which is preferred if the application might be idling in
-    // the background.
-    // event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = App::default();
     event_loop.run_app(&mut app).unwrap();
