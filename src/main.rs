@@ -1,5 +1,7 @@
-use std::sync::Arc;
-
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -28,6 +30,8 @@ const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
 const GRID_SIZE: usize = 32;
 const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
 
+const TICK_INTERVAL_MS: u64 = 1000;
+
 struct State {
     window: Arc<Window>,
     device: wgpu::Device,
@@ -38,7 +42,9 @@ struct State {
     surface_format: wgpu::TextureFormat,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    grid_size_bind_group: wgpu::BindGroup,
+    bind_groups: [wgpu::BindGroup; 2],
+    step: u64,
+    last_tick: Instant,
 }
 
 impl State {
@@ -84,47 +90,56 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let grid_size_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Grid Bind Group Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Grid Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         let mut initial_cell_states = [0u32; GRID_SIZE * GRID_SIZE];
         for i in (0..initial_cell_states.len()).step_by(3) {
             initial_cell_states[i] = 1;
         }
 
-        let cell_state_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer"),
             contents: bytemuck::cast_slice(&initial_cell_states),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
-        let grid_size_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        for i in 0..GRID_SIZE * GRID_SIZE {
+            initial_cell_states[i] = (i < GRID_SIZE) as u32;
+        }
+
+        let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Cell State Buffer"),
+            contents: bytemuck::cast_slice(&initial_cell_states),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Grid Bind Group"),
-            layout: &grid_size_bind_group_layout,
+            layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -132,14 +147,29 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: cell_state_buffer.as_entire_binding(),
+                    resource: cell_state_buffer_a.as_entire_binding(),
+                },
+            ],
+        });
+
+        let bind_group_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Grid Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: grid_size_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: cell_state_buffer_b.as_entire_binding(),
                 },
             ],
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&grid_size_bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -200,7 +230,9 @@ impl State {
             surface_format,
             render_pipeline,
             vertex_buffer,
-            grid_size_bind_group,
+            bind_groups: [bind_group_a, bind_group_b],
+            step: 0,
+            last_tick: Instant::now(),
         };
 
         // Configure surface for the first time
@@ -235,6 +267,17 @@ impl State {
     }
 
     fn render(&mut self) {
+        // Do nothing if not enough time has passed since last tick.
+        //
+        // TODO: We should still render the current state even if not enough
+        // time has passed to run another tick, that way we still render quickly
+        // in response to e.g. the window being resized.
+        if self.last_tick.elapsed() < Duration::from_millis(TICK_INTERVAL_MS) {
+            return;
+        }
+
+        self.last_tick = Instant::now();
+
         // Create texture view.
         let surface_texture = self
             .surface
@@ -273,8 +316,9 @@ impl State {
             occlusion_query_set: None,
         });
 
+        self.step += 1;
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.set_bind_group(0, &self.grid_size_bind_group, &[]);
+        render_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.draw(0..VERTICES.len() as u32 / 2, 0..INSTANCES);
 
@@ -316,7 +360,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 state.render();
-                // Emits a new redraw requested event.
+
+                // Immediately request another redraw so that we can repeatedly
+                // update the simulation.
                 state.get_window().request_redraw();
             }
             WindowEvent::Resized(size) => {
