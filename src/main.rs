@@ -194,8 +194,6 @@ impl State {
 
         self.sim.encode_compute_pass(&mut encoder);
 
-        self.sim.step += 1;
-
         // Create the renderpass which will clear the screen.
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),

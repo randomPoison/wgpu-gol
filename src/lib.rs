@@ -165,7 +165,7 @@ impl LifeSimulation {
         }
     }
 
-    pub fn encode_compute_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn encode_compute_pass(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute Pass"),
             timestamp_writes: None,
@@ -180,5 +180,7 @@ impl LifeSimulation {
         );
 
         drop(compute_pass);
+
+        self.step += 1;
     }
 }

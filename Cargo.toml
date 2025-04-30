@@ -16,3 +16,10 @@ winit = { version = "0.30.9", default-features = false, features = [
     "x11",
     "rwh_06",
 ] }
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "benchmark"
+harness = false
