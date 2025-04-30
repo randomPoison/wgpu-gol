@@ -8,7 +8,7 @@ fn vertex_main(
 ) -> @builtin(position) vec4f {
     // Calculate the coordinates of the cell in the grid.
     let index = f32(instance_index);
-    let cell_coords = vec2f(floor(index / grid_size.x), index % grid_size.x);
+    let cell_coords = vec2f(index % grid_size.x, floor(index / grid_size.x));
 
     // Calculate the size of a cell in clip space.
     let cell_size = 2.0 / grid_size;
