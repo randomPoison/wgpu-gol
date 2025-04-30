@@ -5,15 +5,44 @@
 
 // TODO: Inject the workgroup size at runtime?
 @compute @workgroup_size(8, 8)
-fn compute_main(@builtin(global_invocation_id) global_id: vec3u) {
-    let cell_index = cell_index(global_id.xy);
-    if (in_state[cell_index] == 1) {
-        out_state[cell_index] = 0;
-    } else {
-        out_state[cell_index] = 1;
+fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
+  // Determine how many active neighbors this cell has.
+  let active_neighbors =
+    cell_active(cell.x + 1, cell.y + 1) +
+    cell_active(cell.x + 1, cell.y    ) +
+    cell_active(cell.x + 1, cell.y - 1) +
+    cell_active(cell.x,     cell.y - 1) +
+    cell_active(cell.x - 1, cell.y - 1) +
+    cell_active(cell.x - 1, cell.y    ) +
+    cell_active(cell.x - 1, cell.y + 1) +
+    cell_active(cell.x,     cell.y + 1);
+
+    let i = cell_index(cell.xy);
+
+    // Conway's game of life rules:
+    switch active_neighbors {
+        // Active cells with 2 neighbors stay active.
+        case 2: {
+            out_state[i] = in_state[i];
+        }
+
+        // Cells with 3 neighbors become or stay active.
+        case 3: {
+            out_state[i] = 1;
+        }
+
+        // Cells with < 2 or > 3 neighbors become inactive.
+        default: {
+            out_state[i] = 0;
+        }
     }
 }
 
 fn cell_index(cell: vec2u) -> u32 {
-    return cell.y * u32(grid_size.x) + cell.x;
+    return (cell.y % u32(grid_size.y)) * u32(grid_size.x) +
+        (cell.x % u32(grid_size.x));
+}
+
+fn cell_active(x: u32, y: u32) -> u32 {
+    return in_state[cell_index(vec2(x, y))];
 }

@@ -27,9 +27,9 @@ const VBUFF_LAYOUT: wgpu::VertexBufferLayout = wgpu::VertexBufferLayout {
     attributes: &wgpu::vertex_attr_array![0 => Float32x2],
 };
 
-const GRID_SIZE: usize = 32;
+const GRID_SIZE: usize = 256;
 const INSTANCES: u32 = (GRID_SIZE * GRID_SIZE) as u32;
-const TICK_INTERVAL_MS: u64 = 1000;
+const TICK_INTERVAL_MS: u64 = 1000 / 10;
 const WORKGROUP_SIZE: u32 = 8;
 
 // Make sure the grid is evenly divisible into work groups.
@@ -129,8 +129,8 @@ impl State {
         });
 
         let mut initial_cell_states = [0u32; GRID_SIZE * GRID_SIZE];
-        for i in (0..initial_cell_states.len()).step_by(3) {
-            initial_cell_states[i] = 1;
+        for i in 0..GRID_SIZE * GRID_SIZE {
+            initial_cell_states[i] = rand::random::<u32>() % 2;
         }
 
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -140,7 +140,7 @@ impl State {
         });
 
         for i in 0..GRID_SIZE * GRID_SIZE {
-            initial_cell_states[i] = (i < GRID_SIZE) as u32;
+            initial_cell_states[i] = 0;
         }
 
         let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -326,7 +326,6 @@ impl State {
                 ..Default::default()
             });
 
-        // Renders a GREEN screen.
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
