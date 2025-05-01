@@ -1,3 +1,5 @@
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+
 use wgpu::util::DeviceExt;
 
 const WORKGROUP_SIZE: u32 = 8;
@@ -92,13 +94,16 @@ impl LifeSimulation {
         // Randomly initialize the first state buffer.
         let mut scratch_state = vec![0u32; num_cells as usize];
         for i in 0..num_cells {
-            scratch_state[i] = rand::random::<u32>() % 2;
+            // scratch_state[i] = rand::random::<u32>() % 2;
+            scratch_state[i] = 1;
         }
 
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer A"),
             contents: bytemuck::cast_slice(&scratch_state),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         // Zero-initialize the second state buffer.
@@ -109,7 +114,9 @@ impl LifeSimulation {
         let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer B"),
             contents: bytemuck::cast_slice(&scratch_state),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
 
         let bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -188,6 +195,24 @@ impl LifeSimulation {
         }
     }
 
+    // Restarts the simulation
+    pub fn reset_state(&mut self, state: &[u32]) {
+        assert_eq!(
+            state.len(),
+            self.num_cells,
+            "State data has wrong length, expected {} but got {}",
+            self.num_cells,
+            state.len(),
+        );
+
+        // Reset the step counter so that we're always writing to the first
+        // buffer and that buffer will be the input for the next tick.
+        self.step = 0;
+
+        self.queue
+            .write_buffer(&self.state_bufs[0], 0, bytemuck::cast_slice(state));
+    }
+
     pub fn encode_compute_pass(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute Pass"),
@@ -212,8 +237,56 @@ impl LifeSimulation {
     ///
     /// This must be called before reading from the read buffer. Trying to read
     /// the state without calling this will yield old state data.
-    pub fn encode_read(&mut self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn encode_read(&self, encoder: &mut wgpu::CommandEncoder) {
         let src_buffer = &self.state_bufs[(self.step % 2) as usize];
-        encoder.copy_buffer_to_buffer(src_buffer, 0, &self.read_buf, 0, self.num_cells as u64);
+        encoder.copy_buffer_to_buffer(src_buffer, 0, &self.read_buf, 0, (self.num_cells * size_of::<u32>()) as u64);
+    }
+
+    /// Reads the current grid state from the GPU, blocking until the read
+    /// completes.
+    pub fn read_state(&self) -> Vec<u32> {
+        // Have the GPU copy the current state to the read buffer.
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+        self.encode_read(&mut encoder);
+        self.queue.submit([encoder.finish()]);
+
+        // Wait until the copy operation finishes.
+        self.device
+            .poll(wgpu::PollType::Wait)
+            .expect("Failed to poll device");
+
+        // Read the contents of the read buffer.
+        // -------------------------------------
+
+        let buf_slice = self.read_buf.slice(..);
+
+        let finished_flag = Arc::new(AtomicBool::new(false));
+        let ff_handle = finished_flag.clone();
+
+        buf_slice.map_async(wgpu::MapMode::Read, move |result| {
+            result.expect("Failed to map read buffer");
+            ff_handle.store(true, Ordering::SeqCst);
+        });
+
+        self.device
+            .poll(wgpu::PollType::Wait)
+            .expect("Failed to poll device");
+
+        while !finished_flag.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+
+        let view = buf_slice.get_mapped_range();
+        let data = bytemuck::cast_slice::<_, u32>(&*view).into();
+
+        // Release the read buffer.
+        drop(view);
+        self.read_buf.unmap();
+
+        data
     }
 }
