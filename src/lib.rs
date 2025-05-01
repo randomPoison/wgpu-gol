@@ -10,6 +10,9 @@ pub struct LifeSimulation {
     pub pipeline_layout: wgpu::PipelineLayout,
     pub compute_pipeline: wgpu::ComputePipeline,
     pub bind_groups: [wgpu::BindGroup; 2],
+    pub state_bufs: [wgpu::Buffer; 2],
+    pub read_buf: wgpu::Buffer,
+
     pub step: u64,
 
     pub grid_size: u32,
@@ -86,25 +89,27 @@ impl LifeSimulation {
             ],
         });
 
-        let mut initial_cell_states = vec![0u32; num_cells as usize];
+        // Randomly initialize the first state buffer.
+        let mut scratch_state = vec![0u32; num_cells as usize];
         for i in 0..num_cells {
-            initial_cell_states[i] = rand::random::<u32>() % 2;
+            scratch_state[i] = rand::random::<u32>() % 2;
         }
 
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cell State Buffer"),
-            contents: bytemuck::cast_slice(&initial_cell_states),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label: Some("Cell State Buffer A"),
+            contents: bytemuck::cast_slice(&scratch_state),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
+        // Zero-initialize the second state buffer.
         for i in 0..num_cells {
-            initial_cell_states[i] = 0;
+            scratch_state[i] = 0;
         }
 
         let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cell State Buffer"),
-            contents: bytemuck::cast_slice(&initial_cell_states),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            label: Some("Cell State Buffer B"),
+            contents: bytemuck::cast_slice(&scratch_state),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
         });
 
         let bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -145,6 +150,12 @@ impl LifeSimulation {
             ],
         });
 
+        let read_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Read Buffer"),
+            contents: bytemuck::cast_slice(&scratch_state),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -169,6 +180,8 @@ impl LifeSimulation {
             pipeline_layout,
             compute_pipeline,
             bind_groups: [bind_group_a, bind_group_b],
+            state_bufs: [cell_state_buffer_a, cell_state_buffer_b],
+            read_buf,
             step: 0,
             grid_size,
             num_cells,
@@ -192,5 +205,15 @@ impl LifeSimulation {
         drop(compute_pass);
 
         self.step += 1;
+    }
+
+    /// Tells the GPU to copy the current state of the simulation to the read
+    /// buffer.
+    ///
+    /// This must be called before reading from the read buffer. Trying to read
+    /// the state without calling this will yield old state data.
+    pub fn encode_read(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        let src_buffer = &self.state_bufs[(self.step % 2) as usize];
+        encoder.copy_buffer_to_buffer(src_buffer, 0, &self.read_buf, 0, self.num_cells as u64);
     }
 }
