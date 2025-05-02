@@ -1,10 +1,17 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use wgpu_gol::LifeSimulation;
 
 const GRID_SIZE: u32 = 1024;
 
 fn benchmark(c: &mut Criterion) {
-    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE));
+    // Create a random initialize state for the simulation.
+    let num_cells = (GRID_SIZE * GRID_SIZE) as usize;
+    let mut init_state = vec![0u32; num_cells as usize];
+    for i in 0..num_cells {
+        init_state[i] = rand::random::<u32>() % 2;
+    }
+
+    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE, &init_state));
 
     let mut group = c.benchmark_group("Simulate N Steps");
     for size in [1_u64, 10, 100, 1_000] {

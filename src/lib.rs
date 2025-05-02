@@ -1,4 +1,7 @@
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use wgpu::util::DeviceExt;
 
@@ -22,7 +25,7 @@ pub struct LifeSimulation {
 }
 
 impl LifeSimulation {
-    pub async fn new(grid_size: u32) -> Self {
+    pub async fn new(grid_size: u32, initial_state: &[u32]) -> Self {
         // Make sure the grid size is a multiple of the workgroup size so that
         // the simulation can be broken up cleanly into workgroups.
         assert!(
@@ -32,8 +35,15 @@ impl LifeSimulation {
 
         let num_cells = (grid_size * grid_size) as usize;
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        // Make sure the initial state is the right size.
+        assert!(
+            initial_state.len() == num_cells,
+            "Initial state has wrong size, expected {} but got {}",
+            num_cells,
+            initial_state.len(),
+        );
 
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -91,29 +101,19 @@ impl LifeSimulation {
             ],
         });
 
-        // Randomly initialize the first state buffer.
-        let mut scratch_state = vec![0u32; num_cells as usize];
-        for i in 0..num_cells {
-            // scratch_state[i] = rand::random::<u32>() % 2;
-            scratch_state[i] = 1;
-        }
-
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer A"),
-            contents: bytemuck::cast_slice(&scratch_state),
+            contents: bytemuck::cast_slice(&initial_state),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
-        // Zero-initialize the second state buffer.
-        for i in 0..num_cells {
-            scratch_state[i] = 0;
-        }
+        let empty_state = vec![0u32; num_cells];
 
         let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer B"),
-            contents: bytemuck::cast_slice(&scratch_state),
+            contents: bytemuck::cast_slice(&empty_state),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -159,7 +159,7 @@ impl LifeSimulation {
 
         let read_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Read Buffer"),
-            contents: bytemuck::cast_slice(&scratch_state),
+            contents: bytemuck::cast_slice(&empty_state),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         });
 
@@ -239,7 +239,13 @@ impl LifeSimulation {
     /// the state without calling this will yield old state data.
     pub fn encode_read(&self, encoder: &mut wgpu::CommandEncoder) {
         let src_buffer = &self.state_bufs[(self.step % 2) as usize];
-        encoder.copy_buffer_to_buffer(src_buffer, 0, &self.read_buf, 0, (self.num_cells * size_of::<u32>()) as u64);
+        encoder.copy_buffer_to_buffer(
+            src_buffer,
+            0,
+            &self.read_buf,
+            0,
+            (self.num_cells * size_of::<u32>()) as u64,
+        );
     }
 
     /// Reads the current grid state from the GPU, blocking until the read
