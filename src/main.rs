@@ -42,9 +42,9 @@ impl State {
     async fn new(window: Arc<Window>) -> Self {
         // Create a random initialize state for the simulation.
         let num_cells = (GRID_SIZE * GRID_SIZE) as usize;
-        let mut init_state = vec![0u32; num_cells as usize];
+        let mut init_state = vec![0; num_cells as usize];
         for i in 0..num_cells {
-            init_state[i] = rand::random::<u32>() % 2;
+            init_state[i] = rand::random::<u8>() % 2;
         }
 
         let sim = LifeSimulation::new(GRID_SIZE, &init_state).await;

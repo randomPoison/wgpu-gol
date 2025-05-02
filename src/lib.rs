@@ -25,7 +25,7 @@ pub struct LifeSimulation {
 }
 
 impl LifeSimulation {
-    pub async fn new(grid_size: u32, initial_state: &[u32]) -> Self {
+    pub async fn new(grid_size: u32, initial_state: &[u8]) -> Self {
         // Make sure the grid size is a multiple of the workgroup size so that
         // the simulation can be broken up cleanly into workgroups.
         assert!(
@@ -42,6 +42,12 @@ impl LifeSimulation {
             num_cells,
             initial_state.len(),
         );
+
+        // Convert the list of bytes to a list of u32s.
+        let mut in_state = vec![0u32; num_cells];
+        for i in 0..num_cells {
+            in_state[i] = initial_state[i] as u32;
+        }
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
@@ -103,7 +109,7 @@ impl LifeSimulation {
 
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer A"),
-            contents: bytemuck::cast_slice(&initial_state),
+            contents: bytemuck::cast_slice(&in_state),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -196,7 +202,7 @@ impl LifeSimulation {
     }
 
     // Restarts the simulation
-    pub fn reset_state(&mut self, state: &[u32]) {
+    pub fn reset_state(&mut self, state: &[u8]) {
         assert_eq!(
             state.len(),
             self.num_cells,
@@ -209,8 +215,14 @@ impl LifeSimulation {
         // buffer and that buffer will be the input for the next tick.
         self.step = 0;
 
+        // Convert the list of bytes to a list of u32s.
+        let mut in_state = vec![0u32; self.num_cells];
+        for i in 0..self.num_cells {
+            in_state[i] = state[i] as u32;
+        }
+
         self.queue
-            .write_buffer(&self.state_bufs[0], 0, bytemuck::cast_slice(state));
+            .write_buffer(&self.state_bufs[0], 0, bytemuck::cast_slice(&in_state));
     }
 
     pub fn encode_compute_pass(&mut self, encoder: &mut wgpu::CommandEncoder) {
@@ -250,7 +262,7 @@ impl LifeSimulation {
 
     /// Reads the current grid state from the GPU, blocking until the read
     /// completes.
-    pub fn read_state(&self) -> Vec<u32> {
+    pub fn read_state(&self) -> Vec<u8> {
         // Have the GPU copy the current state to the read buffer.
         let mut encoder = self
             .device
@@ -287,12 +299,18 @@ impl LifeSimulation {
         }
 
         let view = buf_slice.get_mapped_range();
-        let data = bytemuck::cast_slice::<_, u32>(&*view).into();
+        let raw_data = bytemuck::cast_slice::<_, u32>(&*view);
+
+        // Convert the raw data to a byte array.
+        let mut byte_grid = vec![0u8; self.num_cells];
+        for i in 0..self.num_cells {
+            byte_grid[i] = raw_data[i] as u8;
+        }
 
         // Release the read buffer.
         drop(view);
         self.read_buf.unmap();
 
-        data
+        byte_grid
     }
 }
