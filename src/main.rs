@@ -66,7 +66,7 @@ impl State {
 
         let render_shader = sim
             .device
-            .create_shader_module(wgpu::include_wgsl!("render.wgsl"));
+            .create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
         let render_pipeline = sim
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {

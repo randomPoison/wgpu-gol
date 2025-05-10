@@ -175,7 +175,7 @@ impl LifeSimulation {
             push_constant_ranges: &[],
         });
 
-        let simulation_shader = device.create_shader_module(wgpu::include_wgsl!("simulation.wgsl"));
+        let simulation_shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Simulation Pipeline"),
             layout: Some(&pipeline_layout),
