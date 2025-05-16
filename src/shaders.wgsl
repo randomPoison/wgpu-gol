@@ -75,7 +75,10 @@ fn vertex_main(
     grid_pos += cell_coords * cell_size * vec2f(1, -1);
 
     // Scale the square to 0 if the cell is disabled.
-    grid_pos *= f32(in_state[instance_index]);
+    grid_pos *= f32(cell_active(
+        u32(cell_coords.x),
+        u32(cell_coords.y),
+    ));
 
     return vec4f(grid_pos, 0, 1);
 }
