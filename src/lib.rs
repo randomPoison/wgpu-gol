@@ -24,7 +24,7 @@ pub struct LifeSimulation {
     pub logical_grid_size: u32,
 
     /// The total number of cells in the grid.
-    /// 
+    ///
     /// Always `logical_grid_size` squared.
     pub num_cells: usize,
 
@@ -33,7 +33,7 @@ pub struct LifeSimulation {
     pub physical_grid_size: [u32; 2],
 
     /// The total number of `u32` blocks in state buffers.
-    /// 
+    ///
     /// Always `physical_grid_size[0] * physical_grid_size[1]`.
     pub num_blocks: u32,
 }
@@ -186,7 +186,12 @@ impl LifeSimulation {
             push_constant_ranges: &[],
         });
 
-        let simulation_shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
+        let shader =
+            std::fs::read_to_string("src/shaders.wgsl").expect("Failed to read shader file");
+        let simulation_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Simulation Shader"),
+            source: wgpu::ShaderSource::Wgsl(shader.into()),
+        });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Simulation Pipeline"),
             layout: Some(&pipeline_layout),
