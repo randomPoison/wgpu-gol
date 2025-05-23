@@ -5,16 +5,16 @@
 // TODO: Inject the workgroup size at runtime?
 @compute @workgroup_size(8, 8)
 fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
-  // Determine how many active neighbors this cell has.
-  let active_neighbors =
-    cell_active(cell.x + 1, cell.y + 1) +
-    cell_active(cell.x + 1, cell.y    ) +
-    cell_active(cell.x + 1, cell.y - 1) +
-    cell_active(cell.x,     cell.y - 1) +
-    cell_active(cell.x - 1, cell.y - 1) +
-    cell_active(cell.x - 1, cell.y    ) +
-    cell_active(cell.x - 1, cell.y + 1) +
-    cell_active(cell.x,     cell.y + 1);
+    // Determine how many active neighbors this cell has.
+    let active_neighbors =
+        cell_active(cell.x + 1, cell.y + 1) +
+        cell_active(cell.x + 1, cell.y    ) +
+        cell_active(cell.x + 1, cell.y - 1) +
+        cell_active(cell.x,     cell.y - 1) +
+        cell_active(cell.x - 1, cell.y - 1) +
+        cell_active(cell.x - 1, cell.y    ) +
+        cell_active(cell.x - 1, cell.y + 1) +
+        cell_active(cell.x,     cell.y + 1);
 
     let i = cell_index(cell.xy);
 
