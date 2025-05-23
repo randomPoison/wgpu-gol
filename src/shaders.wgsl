@@ -1,4 +1,5 @@
 @group(0) @binding(0) var<uniform> grid_size: vec2f;
+@group(0) @binding(3) var<uniform> physical_grid_size: vec2u;
 @group(0) @binding(1) var<storage> in_state: array<u32>;
 @group(0) @binding(2) var<storage, read_write> out_state: array<u32>;
 
@@ -47,11 +48,7 @@ fn cell_index(cell: vec2u) -> u32 {
 */
 
 fn cell_active(x: u32, y: u32) -> u32 {
-    // TODO: These can be extracted into a uniform.
-    let block_width = u32(ceil(grid_size.x / 32));
-    let block_height = u32(grid_size.y);
-
-    let block_index = block_width * y + x / 32;
+    let block_index = physical_grid_size.x * y + x / 32;
     let bit_index = x % 32;
     let mask = 1u << bit_index;
 
