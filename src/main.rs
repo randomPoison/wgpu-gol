@@ -22,7 +22,7 @@ static VERTICES: &[f32] = &[
   -0.8,  0.8,
 ];
 
-const GRID_SIZE: u32 = 512;
+const GRID_SIZE: u32 = 32;
 const TICK_INTERVAL_MS: u64 = 1000 / 10;
 
 struct State {
@@ -43,6 +43,7 @@ impl State {
         // Create a random initialize state for the simulation.
         let num_cells = (GRID_SIZE * GRID_SIZE) as usize;
         let mut init_state = vec![0; num_cells as usize];
+
         for i in 0..num_cells {
             init_state[i] = rand::random::<u8>() % 2;
         }
@@ -199,7 +200,7 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
-        self.sim.encode_compute_pass(&mut encoder);
+        // self.sim.encode_compute_pass(&mut encoder);
 
         // Create the renderpass which will clear the screen.
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

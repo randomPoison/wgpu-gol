@@ -2,7 +2,6 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-
 use wgpu::util::DeviceExt;
 
 const WORKGROUP_SIZE: u32 = 8;
@@ -20,8 +19,23 @@ pub struct LifeSimulation {
 
     pub step: u64,
 
-    pub grid_size: u32,
+    /// The size in **cells** of the grid. This will be different from the
+    /// number of blocks in the grid.
+    pub logical_grid_size: u32,
+
+    /// The total number of cells in the grid.
+    /// 
+    /// Always `logical_grid_size` squared.
     pub num_cells: usize,
+
+    /// The size in **blocks** of the grid. This will not be square because the
+    /// individual blocks represent rectangular chunks of the grid.
+    pub physical_grid_size: [u32; 2],
+
+    /// The total number of `u32` blocks in state buffers.
+    /// 
+    /// Always `physical_grid_size[0] * physical_grid_size[1]`.
+    pub num_blocks: u32,
 }
 
 impl LifeSimulation {
@@ -44,10 +58,8 @@ impl LifeSimulation {
         );
 
         // Convert the list of bytes to a list of u32s.
-        let mut in_state = vec![0u32; num_cells];
-        for i in 0..num_cells {
-            in_state[i] = initial_state[i] as u32;
-        }
+        let (packed_state, physical_grid_size) = pack_grid(grid_size, initial_state);
+        let num_blocks = physical_grid_size[0] * physical_grid_size[1];
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
@@ -109,14 +121,13 @@ impl LifeSimulation {
 
         let cell_state_buffer_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer A"),
-            contents: bytemuck::cast_slice(&in_state),
+            contents: bytemuck::cast_slice(&packed_state),
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
-        let empty_state = vec![0u32; num_cells];
-
+        let empty_state = vec![0u32; num_blocks as usize];
         let cell_state_buffer_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell State Buffer B"),
             contents: bytemuck::cast_slice(&empty_state),
@@ -196,8 +207,10 @@ impl LifeSimulation {
             state_bufs: [cell_state_buffer_a, cell_state_buffer_b],
             read_buf,
             step: 0,
-            grid_size,
+            logical_grid_size: grid_size,
             num_cells,
+            physical_grid_size,
+            num_blocks,
         }
     }
 
@@ -234,8 +247,8 @@ impl LifeSimulation {
         compute_pass.set_pipeline(&self.compute_pipeline);
         compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
         compute_pass.dispatch_workgroups(
-            self.grid_size / WORKGROUP_SIZE,
-            self.grid_size / WORKGROUP_SIZE,
+            self.logical_grid_size / WORKGROUP_SIZE,
+            self.logical_grid_size / WORKGROUP_SIZE,
             1,
         );
 
@@ -313,4 +326,32 @@ impl LifeSimulation {
 
         byte_grid
     }
+}
+
+/// Calcuate the size of the logical grid, and packs the initial state into a
+/// vector of `u32`s.
+pub fn pack_grid(grid_size: u32, initial_state: &[u8]) -> (Vec<u32>, [u32; 2]) {
+    assert_eq!(initial_state.len(), (grid_size * grid_size) as usize);
+
+    // Calculate the width and height in blocks.
+    let block_width = grid_size.div_ceil(32);
+    let block_height = grid_size;
+    let num_blocks = block_width * block_height;
+
+    let mut packed_state = vec![0u32; num_blocks as usize];
+    for x in 0..grid_size {
+        for y in 0..grid_size {
+            let cell_index = y * grid_size + x;
+            let state = initial_state[cell_index as usize] as u32;
+
+            let block_index = block_width * y + x / 32;
+            let bit_index = x % 32;
+            let mask = state << bit_index;
+
+            let block = &mut packed_state[block_index as usize];
+            *block |= mask;
+        }
+    }
+
+    (packed_state, [block_width, block_height])
 }

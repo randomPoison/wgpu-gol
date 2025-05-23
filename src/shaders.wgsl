@@ -5,6 +5,7 @@
 // TODO: Inject the workgroup size at runtime?
 @compute @workgroup_size(8, 8)
 fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
+    /*
     // Determine how many active neighbors this cell has.
     let active_neighbors =
         cell_active(cell.x + 1, cell.y + 1) +
@@ -35,15 +36,26 @@ fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
             out_state[i] = 0;
         }
     }
+    */
 }
 
+/*
 fn cell_index(cell: vec2u) -> u32 {
     return (cell.y % u32(grid_size.y)) * u32(grid_size.x) +
         (cell.x % u32(grid_size.x));
 }
+*/
 
 fn cell_active(x: u32, y: u32) -> u32 {
-    return in_state[cell_index(vec2(x, y))];
+    // TODO: These can be extracted into a uniform.
+    let block_width = u32(ceil(grid_size.x / 32));
+    let block_height = u32(grid_size.y);
+
+    let block_index = block_width * y + x / 32;
+    let bit_index = x % 32;
+    let mask = 1u << bit_index;
+
+    return u32((in_state[block_index] & mask) != 0u);
 }
 
 // =============================================================================
