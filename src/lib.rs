@@ -83,11 +83,12 @@ impl LifeSimulation {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let physical_grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Physical Grid Size Buffer"),
-            contents: bytemuck::cast_slice(&physical_grid_size),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let physical_grid_size_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Physical Grid Size Buffer"),
+                contents: bytemuck::cast_slice(&physical_grid_size),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Grid Bind Group Layout"),
@@ -258,10 +259,7 @@ impl LifeSimulation {
         self.step = 0;
 
         // Convert the list of bytes to a list of u32s.
-        let mut in_state = vec![0u32; self.num_cells];
-        for i in 0..self.num_cells {
-            in_state[i] = state[i] as u32;
-        }
+        let in_state = pack_grid(self.logical_grid_size, state).0;
 
         self.queue
             .write_buffer(&self.state_bufs[0], 0, bytemuck::cast_slice(&in_state));
@@ -298,7 +296,7 @@ impl LifeSimulation {
             0,
             &self.read_buf,
             0,
-            (self.num_cells * size_of::<u32>()) as u64,
+            (self.num_blocks as usize * size_of::<u32>()) as u64,
         );
     }
 
@@ -309,7 +307,7 @@ impl LifeSimulation {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
+                label: Some("Read State Encoder"),
             });
         self.encode_read(&mut encoder);
         self.queue.submit([encoder.finish()]);
@@ -344,10 +342,7 @@ impl LifeSimulation {
         let raw_data = bytemuck::cast_slice::<_, u32>(&*view);
 
         // Convert the raw data to a byte array.
-        let mut byte_grid = vec![0u8; self.num_cells];
-        for i in 0..self.num_cells {
-            byte_grid[i] = raw_data[i] as u8;
-        }
+        let byte_grid = unpack_grid(self.logical_grid_size, raw_data);
 
         // Release the read buffer.
         drop(view);
@@ -383,4 +378,25 @@ pub fn pack_grid(grid_size: u32, initial_state: &[u8]) -> (Vec<u32>, [u32; 2]) {
     }
 
     (packed_state, [block_width, block_height])
+}
+
+pub fn unpack_grid(grid_size: u32, packed_state: &[u32]) -> Vec<u8> {
+    let mut unpacked_state = vec![0u8; (grid_size * grid_size) as usize];
+
+    let block_width = grid_size.div_ceil(32);
+
+    for x in 0..grid_size {
+        for y in 0..grid_size {
+            let cell_index = y * grid_size + x;
+
+            let block_index = block_width * y + x / 32;
+            let bit_index = x % 32;
+            let mask = 1 << bit_index;
+            let state = (packed_state[block_index as usize] & mask) != 0;
+
+            unpacked_state[cell_index as usize] = state as u8;
+        }
+    }
+
+    unpacked_state
 }
