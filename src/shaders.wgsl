@@ -4,55 +4,86 @@
 @group(0) @binding(2) var<storage, read_write> out_state: array<u32>;
 
 // TODO: Inject the workgroup size at runtime?
-@compute @workgroup_size(8, 8)
-fn compute_main(@builtin(global_invocation_id) cell: vec3u) {
-    /*
-    // Determine how many active neighbors this cell has.
-    let active_neighbors =
-        cell_active(cell.x + 1, cell.y + 1) +
-        cell_active(cell.x + 1, cell.y    ) +
-        cell_active(cell.x + 1, cell.y - 1) +
-        cell_active(cell.x,     cell.y - 1) +
-        cell_active(cell.x - 1, cell.y - 1) +
-        cell_active(cell.x - 1, cell.y    ) +
-        cell_active(cell.x - 1, cell.y + 1) +
-        cell_active(cell.x,     cell.y + 1);
+@compute @workgroup_size(8)
+fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
+    let block_index = invocation.x;
+    let block_in = in_state[block_index];
+    var block_out = 0u;
 
-    let i = cell_index(cell.xy);
+    let block_row = block_index / physical_grid_size.x;
+    let block_start = block_row * u32(grid_size.x);
 
-    // Conway's game of life rules:
-    switch active_neighbors {
-        // Active cells with 2 neighbors stay active.
-        case 2: {
-            out_state[i] = in_state[i];
+    for (var bit_index = 0u; bit_index < 32u; bit_index++) {
+        let cell_index = block_start + bit_index;
+        let cell = cell_index_to_cell_coords(cell_index);
+
+        // Skip cells that are outside the grid.
+        if (cell.x >= u32(grid_size.x)) {
+            break;
         }
 
-        // Cells with 3 neighbors become or stay active.
-        case 3: {
-            out_state[i] = 1;
-        }
+        // Determine how many active neighbors this cell has.
+        let active_neighbors =
+            cell_active(cell.x + 1, cell.y + 1) +
+            cell_active(cell.x + 1, cell.y    ) +
+            cell_active(cell.x + 1, cell.y - 1) +
+            cell_active(cell.x,     cell.y - 1) +
+            cell_active(cell.x - 1, cell.y - 1) +
+            cell_active(cell.x - 1, cell.y    ) +
+            cell_active(cell.x - 1, cell.y + 1) +
+            cell_active(cell.x,     cell.y + 1);
 
-        // Cells with < 2 or > 3 neighbors become inactive.
-        default: {
-            out_state[i] = 0;
+        let mask = 1u << bit_index;
+
+        // Conway's game of life rules:
+        switch active_neighbors {
+            // Active cells with 2 neighbors stay active.
+            case 2: {
+                block_out |= block_in & mask;
+            }
+
+            // Cells with 3 neighbors become or stay active.
+            case 3: {
+                block_out |= mask;
+            }
+
+            // Cells with < 2 or > 3 neighbors become inactive.
+            default: {
+                block_out &= ~mask;
+            }
         }
     }
-    */
+
+    out_state[block_index] = block_out;
 }
 
-/*
-fn cell_index(cell: vec2u) -> u32 {
-    return (cell.y % u32(grid_size.y)) * u32(grid_size.x) +
-        (cell.x % u32(grid_size.x));
+// Converts the cell coordinates into block coordinates (i.e. block index and
+// bit index).
+//
+// TODO: Create a struct for the block coords to make the block index vs bit
+// index more clear.
+fn block_index(cell: vec2u) -> vec2u {
+    let wrapped_coords = vec2u(
+        cell.x % u32(grid_size.x),
+        cell.y % u32(grid_size.y),
+    );
+
+    let block_index =
+        physical_grid_size.x * wrapped_coords.y + wrapped_coords.x / 32;
+    let bit_index = cell.x % 32;
+    return vec2u(block_index, bit_index);
 }
-*/
 
 fn cell_active(x: u32, y: u32) -> u32 {
-    let block_index = physical_grid_size.x * y + x / 32;
-    let bit_index = x % 32;
-    let mask = 1u << bit_index;
+    let block_coords = block_index(vec2u(x, y));
+    let mask = 1u << block_coords.y;
+    return u32((in_state[block_coords.x] & mask) != 0u);
+}
 
-    return u32((in_state[block_index] & mask) != 0u);
+fn cell_index_to_cell_coords(index: u32) -> vec2u {
+    // TODO: Extract grid width to a uniform.
+    let width = u32(grid_size.x);
+    return vec2u(index % width, index / width);
 }
 
 // =============================================================================
@@ -62,11 +93,10 @@ fn cell_active(x: u32, y: u32) -> u32 {
 @vertex
 fn vertex_main(
     @location(0) pos: vec2f,
-    @builtin(instance_index) instance_index: u32,
+    @builtin(instance_index) cell_index: u32,
 ) -> @builtin(position) vec4f {
     // Calculate the coordinates of the cell in the grid.
-    let index = f32(instance_index);
-    let cell_coords = vec2f(index % grid_size.x, floor(index / grid_size.x));
+    let cell_coords = cell_index_to_cell_coords(cell_index);
 
     // Calculate the size of a cell in clip space.
     let cell_size = 2.0 / grid_size;
@@ -81,12 +111,12 @@ fn vertex_main(
     grid_pos += vec2f(-1, 1);
 
     // Shift the square to the position for its cell coordinates.
-    grid_pos += cell_coords * cell_size * vec2f(1, -1);
+    grid_pos += vec2f(cell_coords) * cell_size * vec2f(1, -1);
 
     // Scale the square to 0 if the cell is disabled.
     grid_pos *= f32(cell_active(
-        u32(cell_coords.x),
-        u32(cell_coords.y),
+        cell_coords.x,
+        cell_coords.y,
     ));
 
     return vec4f(grid_pos, 0, 1);

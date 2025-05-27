@@ -22,7 +22,7 @@ static VERTICES: &[f32] = &[
   -0.8,  0.8,
 ];
 
-const GRID_SIZE: u32 = 32;
+const GRID_SIZE: u32 = 64;
 const TICK_INTERVAL_MS: u64 = 1000 / 10;
 
 struct State {
@@ -200,7 +200,7 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
-        // self.sim.encode_compute_pass(&mut encoder);
+        self.sim.encode_compute_pass(&mut encoder);
 
         // Create the renderpass which will clear the screen.
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

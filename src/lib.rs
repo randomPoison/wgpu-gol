@@ -266,6 +266,13 @@ impl LifeSimulation {
     }
 
     pub fn encode_compute_pass(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        assert!(
+            self.num_blocks % WORKGROUP_SIZE == 0,
+            "Number of blocks ({}) is not divisible by workgroup size ({})",
+            self.num_blocks,
+            WORKGROUP_SIZE,
+        );
+
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute Pass"),
             timestamp_writes: None,
@@ -273,11 +280,7 @@ impl LifeSimulation {
 
         compute_pass.set_pipeline(&self.compute_pipeline);
         compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
-        compute_pass.dispatch_workgroups(
-            self.logical_grid_size / WORKGROUP_SIZE,
-            self.logical_grid_size / WORKGROUP_SIZE,
-            1,
-        );
+        compute_pass.dispatch_workgroups(self.num_blocks / WORKGROUP_SIZE, 1, 1);
 
         drop(compute_pass);
 
