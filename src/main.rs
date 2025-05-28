@@ -40,7 +40,7 @@ struct State {
 
 impl State {
     async fn new(window: Arc<Window>) -> Self {
-        // Create a random initialize state for the simulation.
+        // Create a random initial state for the simulation.
         let num_cells = (GRID_SIZE * GRID_SIZE) as usize;
         let mut init_state = vec![0; num_cells as usize];
 
