@@ -37,21 +37,25 @@ static GLIDER_3: &[u8] = &[
 ];
 
 fn zero_steps() {
-    let all_on = [1; 64];
+    const GRID_SIZE: usize = 8;
 
-    let mut sim = pollster::block_on(LifeSimulation::new(8, &all_on));
+    let all_on = [1; GRID_SIZE * GRID_SIZE];
+
+    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE as u32, &all_on));
 
     let state = sim.read_state();
-    assert_eq!(&state, &all_on);
+    assert_grid_eq(GRID_SIZE, &state, &all_on);
 
-    let all_off = [0; 64];
+    let all_off = [0; GRID_SIZE * GRID_SIZE];
     sim.reset_state(&all_off);
 
     let state = sim.read_state();
-    assert_eq!(&state, &all_off);
+    assert_grid_eq(GRID_SIZE, &state, &all_off);
 }
 
 fn still_life() {
+    const GRID_SIZE: usize = 8;
+
     #[rustfmt::skip]
     let init_state = [
         0, 0, 0, 0, 0, 0, 0, 0,
@@ -64,29 +68,31 @@ fn still_life() {
         0, 0, 0, 0, 1, 1, 0, 0,
     ];
 
-    let mut sim = pollster::block_on(LifeSimulation::new(8, &init_state));
+    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE as u32, &init_state));
 
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_eq!(&state, &init_state);
+    assert_grid_eq(GRID_SIZE, &state, &init_state);
 
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_eq!(&state, &init_state);
+    assert_grid_eq(GRID_SIZE, &state, &init_state);
 }
 
 fn glider() {
-    let mut sim = pollster::block_on(LifeSimulation::new(8, &GLIDER_1));
+    const GRID_SIZE: usize = 8;
+
+    let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE as u32, &GLIDER_1));
 
     do_step(&mut sim);
     let state = sim.read_state();
-    assert_eq!(&state, &GLIDER_2);
+    assert_grid_eq(GRID_SIZE, &state, &GLIDER_2);
 
     do_step(&mut sim);
     let state = sim.read_state();
-    assert_eq!(&state, &GLIDER_3);
+    assert_grid_eq(GRID_SIZE, &state, &GLIDER_3);
 }
 
 fn big_grid() {
@@ -110,12 +116,35 @@ fn big_grid() {
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_eq!(&state, &big_state_2);
+    assert_grid_eq(GRID_SIZE, &big_state_2, &state);
 
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_eq!(&state, &big_state_3);
+    assert_grid_eq(GRID_SIZE, &big_state_3, &state);
+}
+
+#[track_caller]
+fn assert_grid_eq(grid_size: usize, expected: &[u8], actual: &[u8]) {
+    assert_eq!(expected.len(), grid_size * grid_size);
+    assert_eq!(actual.len(), grid_size * grid_size);
+
+    if expected != actual {
+        eprintln!("Grids do not match!");
+        eprintln!("Expected grid: [");
+        for row in expected.chunks(grid_size) {
+            eprintln!("{:?}", row);
+        }
+        eprintln!("]");
+
+        eprintln!("Actual grid: [");
+        for row in actual.chunks(grid_size) {
+            eprintln!("{:?}", row);
+        }
+        eprintln!("]");
+
+        panic!("assert_grid_eq failed: grids do not match");
+    }
 }
 
 /// Copies a smaller 8x8 grid into a larger 64x64 grid at the specified offset.
