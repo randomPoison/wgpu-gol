@@ -98,30 +98,37 @@ fn glider() {
 fn big_grid() {
     const GRID_SIZE: usize = 64;
 
-    // Initialize the full grid states by copying the smaller glider patterns into the full buffer.
+    let mut sim = pollster::block_on(LifeSimulation::new(64, &[0; GRID_SIZE * GRID_SIZE]));
 
-    let mut big_state_1 = [0u8; GRID_SIZE * GRID_SIZE];
-    copy_to_grid(&GLIDER_1, &mut big_state_1, [0, 0]);
+    for x_off in 0..GRID_SIZE - 8 {
+        for y_off in 0..GRID_SIZE - 8 {
+            eprintln!("Testing with offset ({}, {})", x_off, y_off);
 
-    let mut big_state_2 = [0u8; GRID_SIZE * GRID_SIZE];
-    copy_to_grid(&GLIDER_2, &mut big_state_2, [0, 0]);
+            // Initialize the full grid states by copying the smaller glider patterns into the full buffer.
 
-    let mut big_state_3 = [0u8; GRID_SIZE * GRID_SIZE];
-    copy_to_grid(&GLIDER_3, &mut big_state_3, [0, 0]);
+            let mut big_state_1 = [0u8; GRID_SIZE * GRID_SIZE];
+            copy_to_grid(&GLIDER_1, &mut big_state_1, [x_off, y_off]);
 
-    // Run the actual test.
+            let mut big_state_2 = [0u8; GRID_SIZE * GRID_SIZE];
+            copy_to_grid(&GLIDER_2, &mut big_state_2, [x_off, y_off]);
 
-    let mut sim = pollster::block_on(LifeSimulation::new(64, &big_state_1));
+            let mut big_state_3 = [0u8; GRID_SIZE * GRID_SIZE];
+            copy_to_grid(&GLIDER_3, &mut big_state_3, [x_off, y_off]);
 
-    do_step(&mut sim);
+            // Run the actual test.
+            sim.reset_state(&big_state_1);
 
-    let state = sim.read_state();
-    assert_grid_eq(GRID_SIZE, &big_state_2, &state);
+            do_step(&mut sim);
 
-    do_step(&mut sim);
+            let state = sim.read_state();
+            assert_grid_eq(GRID_SIZE, &big_state_2, &state);
 
-    let state = sim.read_state();
-    assert_grid_eq(GRID_SIZE, &big_state_3, &state);
+            do_step(&mut sim);
+
+            let state = sim.read_state();
+            assert_grid_eq(GRID_SIZE, &big_state_3, &state);
+        }
+    }
 }
 
 #[track_caller]
