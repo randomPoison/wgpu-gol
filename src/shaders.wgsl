@@ -7,17 +7,24 @@
 @compute @workgroup_size(8)
 fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
     let block_index = invocation.x;
+
+    // TODO: Make this a uniform.
+    let cells_per_row = min(physical_grid_size.x * 32, u32(grid_size.x));
+
+    let block_row = block_index / physical_grid_size.x;
+    let block_col = block_index % physical_grid_size.x;
+    let block_start_cell = block_row * cells_per_row + block_col * 32;
+
     let block_in = in_state[block_index];
     var block_out = 0u;
 
-    let block_row = block_index / physical_grid_size.x;
-    let block_start = block_row * u32(grid_size.x);
-
     for (var bit_index = 0u; bit_index < 32u; bit_index++) {
-        let cell_index = block_start + bit_index;
+        let cell_index = block_start_cell + bit_index;
         let cell = cell_index_to_cell_coords(cell_index);
 
         // Skip cells that are outside the grid.
+        //
+        // TODO: It would be better to cap bit_index at the appropriate max value.
         if (cell.x >= u32(grid_size.x)) {
             break;
         }
@@ -76,8 +83,11 @@ fn block_index(cell: vec2u) -> vec2u {
 
 fn cell_active(x: u32, y: u32) -> u32 {
     let block_coords = block_index(vec2u(x, y));
-    let mask = 1u << block_coords.y;
-    return u32((in_state[block_coords.x] & mask) != 0u);
+    let block_index = block_coords.x;
+    let bit_index = block_coords.y;
+
+    let mask = 1u << bit_index;
+    return u32((in_state[block_index] & mask) != 0u);
 }
 
 fn cell_index_to_cell_coords(index: u32) -> vec2u {
