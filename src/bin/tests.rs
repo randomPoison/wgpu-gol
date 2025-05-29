@@ -73,12 +73,12 @@ fn still_life() {
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_grid_eq(GRID_SIZE, &state, &init_state);
+    assert_grid_eq(GRID_SIZE, &init_state, &state);
 
     do_step(&mut sim);
 
     let state = sim.read_state();
-    assert_grid_eq(GRID_SIZE, &state, &init_state);
+    assert_grid_eq(GRID_SIZE, &init_state, &state);
 }
 
 fn glider() {
