@@ -22,6 +22,8 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
         return;
     }
 
+    // Calculate the cell index that this block starts at. This is used to
+    // calculate the index for each cell in the block.
     let block_row = block_index / physical_grid_size.x;
     let block_col = block_index % physical_grid_size.x;
     let block_start_cell = block_row * grid_sizeu.x + block_col * 32;
@@ -29,16 +31,14 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
     let block_in = in_state[block_index];
     var block_out = 0u;
 
-    for (var bit_index = 0u; bit_index < 32u; bit_index++) {
+    // Calculate the maximum bit for this block in case the current row ends in
+    // the middle of the block. This comes up e.g. in the tests when using an
+    // 8x8 grid.
+    let max_bit = min(32u, grid_sizeu.x - block_col * 32);
+
+    for (var bit_index = 0u; bit_index < max_bit; bit_index++) {
         let cell_index = block_start_cell + bit_index;
         let cell = cell_index_to_cell_coords(cell_index);
-
-        // Skip cells that are outside the grid.
-        //
-        // TODO: It would be better to cap bit_index at the appropriate max value.
-        if (cell.x >= grid_sizeu.x) {
-            break;
-        }
 
         // Determine how many active neighbors this cell has.
         let active_neighbors =
