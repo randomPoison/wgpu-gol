@@ -70,9 +70,15 @@ impl LifeSimulation {
             .await
             .unwrap();
 
-        let grid_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grid Size Buffer"),
+        let grid_sizef_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Size Float Buffer"),
             contents: bytemuck::cast_slice(&[grid_size as f32, grid_size as f32]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let grid_sizeu_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Grid Size U32 Buffer"),
+            contents: bytemuck::cast_slice(&[grid_size, grid_size]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -86,6 +92,7 @@ impl LifeSimulation {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Grid Bind Group Layout"),
             entries: &[
+                // grid_sizef
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
@@ -96,6 +103,18 @@ impl LifeSimulation {
                     },
                     count: None,
                 },
+                // grid_sizeu
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // physical_grid_size
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
@@ -106,6 +125,7 @@ impl LifeSimulation {
                     },
                     count: None,
                 },
+                // in_state
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
@@ -116,6 +136,7 @@ impl LifeSimulation {
                     },
                     count: None,
                 },
+                // out_state
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -152,7 +173,11 @@ impl LifeSimulation {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: grid_size_buffer.as_entire_binding(),
+                    resource: grid_sizef_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: grid_sizeu_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -175,7 +200,11 @@ impl LifeSimulation {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: grid_size_buffer.as_entire_binding(),
+                    resource: grid_sizef_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: grid_sizeu_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,

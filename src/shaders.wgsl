@@ -1,4 +1,5 @@
-@group(0) @binding(0) var<uniform> grid_size: vec2f;
+@group(0) @binding(0) var<uniform> grid_sizef: vec2f;
+@group(0) @binding(4) var<uniform> grid_sizeu: vec2u;
 @group(0) @binding(3) var<uniform> physical_grid_size: vec2u;
 @group(0) @binding(1) var<storage> in_state: array<u32>;
 @group(0) @binding(2) var<storage, read_write> out_state: array<u32>;
@@ -17,16 +18,13 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
     // of `in_state` or writing past the end of `out_state` are, so I'm not sure
     // if removing this would cause some subtle bug I'm not covering in the
     // tests.
-    if (block_index >= physical_grid_size.x * physical_grid_size.y) {
+    if block_index >= physical_grid_size.x * physical_grid_size.y {
         return;
     }
 
-    // TODO: Make this a uniform.
-    let cells_per_row = min(physical_grid_size.x * 32, u32(grid_size.x));
-
     let block_row = block_index / physical_grid_size.x;
     let block_col = block_index % physical_grid_size.x;
-    let block_start_cell = block_row * cells_per_row + block_col * 32;
+    let block_start_cell = block_row * grid_sizeu.x + block_col * 32;
 
     let block_in = in_state[block_index];
     var block_out = 0u;
@@ -38,7 +36,7 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
         // Skip cells that are outside the grid.
         //
         // TODO: It would be better to cap bit_index at the appropriate max value.
-        if (cell.x >= u32(grid_size.x)) {
+        if (cell.x >= grid_sizeu.x) {
             break;
         }
 
@@ -84,8 +82,8 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
 // index more clear.
 fn block_index(cell: vec2u) -> vec2u {
     let wrapped_coords = vec2u(
-        cell.x % u32(grid_size.x),
-        cell.y % u32(grid_size.y),
+        cell.x % grid_sizeu.x,
+        cell.y % grid_sizeu.y,
     );
 
     let block_index =
@@ -104,9 +102,7 @@ fn cell_active(x: u32, y: u32) -> u32 {
 }
 
 fn cell_index_to_cell_coords(index: u32) -> vec2u {
-    // TODO: Extract grid width to a uniform.
-    let width = u32(grid_size.x);
-    return vec2u(index % width, index / width);
+    return vec2u(index % grid_sizeu.x, index / grid_sizeu.x);
 }
 
 // =============================================================================
@@ -122,10 +118,10 @@ fn vertex_main(
     let cell_coords = cell_index_to_cell_coords(cell_index);
 
     // Calculate the size of a cell in clip space.
-    let cell_size = 2.0 / grid_size;
+    let cell_size = 2.0 / grid_sizef;
 
     // Divide by the grid size so that our square is the correct size.
-    var grid_pos = pos / grid_size;
+    var grid_pos = pos / grid_sizef;
 
     // Shift the square so that its top left corner is centered in the window.
     grid_pos += (cell_size / 2f) * vec2f(1, -1);
