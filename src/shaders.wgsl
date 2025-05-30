@@ -4,9 +4,22 @@
 @group(0) @binding(2) var<storage, read_write> out_state: array<u32>;
 
 // TODO: Inject the workgroup size at runtime?
-@compute @workgroup_size(8)
+@compute @workgroup_size(64)
 fn compute_main(@builtin(global_invocation_id) invocation: vec3u) {
     let block_index = invocation.x;
+
+    // If the number of blocks isn't a clean multiple of the workgroup size we
+    // end up with extra invocations that don't correspond to a real block. We
+    // can simply do nothing in that case.
+    //
+    // TODO: Is this even necessary? Tests all pass when I remove the early
+    // return, but I'm not sure what the exact semantics of reading past the end
+    // of `in_state` or writing past the end of `out_state` are, so I'm not sure
+    // if removing this would cause some subtle bug I'm not covering in the
+    // tests.
+    if (block_index >= physical_grid_size.x * physical_grid_size.y) {
+        return;
+    }
 
     // TODO: Make this a uniform.
     let cells_per_row = min(physical_grid_size.x * 32, u32(grid_size.x));

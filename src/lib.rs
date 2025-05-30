@@ -4,7 +4,7 @@ use std::sync::{
 };
 use wgpu::util::DeviceExt;
 
-const WORKGROUP_SIZE: u32 = 8;
+const WORKGROUP_SIZE: u32 = 64;
 
 pub struct LifeSimulation {
     pub instance: wgpu::Instance,
@@ -40,13 +40,6 @@ pub struct LifeSimulation {
 
 impl LifeSimulation {
     pub async fn new(grid_size: u32, initial_state: &[u8]) -> Self {
-        // Make sure the grid size is a multiple of the workgroup size so that
-        // the simulation can be broken up cleanly into workgroups.
-        assert!(
-            grid_size as u32 % WORKGROUP_SIZE == 0,
-            "Grid size {grid_size} is not divisible by {WORKGROUP_SIZE}",
-        );
-
         let num_cells = (grid_size * grid_size) as usize;
 
         // Make sure the initial state is the right size.
@@ -266,13 +259,6 @@ impl LifeSimulation {
     }
 
     pub fn encode_compute_pass(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        assert!(
-            self.num_blocks % WORKGROUP_SIZE == 0,
-            "Number of blocks ({}) is not divisible by workgroup size ({})",
-            self.num_blocks,
-            WORKGROUP_SIZE,
-        );
-
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Compute Pass"),
             timestamp_writes: None,
@@ -280,7 +266,7 @@ impl LifeSimulation {
 
         compute_pass.set_pipeline(&self.compute_pipeline);
         compute_pass.set_bind_group(0, &self.bind_groups[(self.step % 2) as usize], &[]);
-        compute_pass.dispatch_workgroups(self.num_blocks / WORKGROUP_SIZE, 1, 1);
+        compute_pass.dispatch_workgroups(self.num_blocks.div_ceil(WORKGROUP_SIZE), 1, 1);
 
         drop(compute_pass);
 
