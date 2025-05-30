@@ -14,7 +14,7 @@ fn benchmark(c: &mut Criterion) {
     let mut sim = pollster::block_on(LifeSimulation::new(GRID_SIZE, &init_state));
 
     let mut group = c.benchmark_group("Simulate N Steps");
-    for size in [1_u64, 10, 100, 1_000] {
+    for size in [1_000, 100, 10, 1] {
         group.throughput(Throughput::Elements(size));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, size| {
             b.iter(|| {
